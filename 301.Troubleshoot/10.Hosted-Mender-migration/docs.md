@@ -1,52 +1,114 @@
-Mender team offers two public instances for the Mender software: [hosted
-Mender](https://hosted.mender.io?target=_blank), which is located in USA, and [hosted
-Mender](https://eu.hosted.mender.io?target=_blank), which is located in Europe.
+---
+title: Hosted Mender - tenant migration
+taxonomy:
+    category: docs
+---
 
-This guide shows how to migrate deployed devices from hosted Mender (USA) to EU hosted Mender
-(Europe).
 
-!!!!! Migration to EU hosted Mender without risks requires support assistance, and it is not possible
-!!!!! to self-migrate your `TenantToken` from one location to the other. If you wish to migrate your 
-!!!!! tenant to EU hosted Mender please email [contact@mender.io](mailto:contact@mender.io) with your request.
+Historically we have only had a single instance in the US.
+We have expanded and Hosted Mender instances are offered in [multiple regions](/11.General/00.Hosted-Mender-regions/docs.md). 
+If you already have a fleet of devices working with the US instance and would like to move to a different on, this document will explain the migration process.
 
-!!! Mender currently supports these [regions](/11.General/00.Hosted-Mender-regions/docs.md).
+!!!!! Migration between instances without risks requires support assistance and is a payed service.
+!!!!! If you wish to migrate your account please contact us on [support@mender.io](mailto:contact@mender.io) with the title **Tenant migration**.
 
 ## Introduction
 
+Going forward the following terms will be used:
+* **Old server** will represent the server that you want to move away from
+* **New server** will represent the server that you want to migrate to
+
+
 The migration from one server to the other consists of three steps:
-* From hosted Mender, deploy a software update to your devices which contains an updated
-`mender.conf` file. This new configuration will use the `Servers` property to specify an array of
-server URLs.
-* Reject devices from the old server, so that the devices fallback to the new server once they get
-Unauthorized error from the old server.
-* From EU hosted Mender, deploy a new software update with a `mender.conf` containing only the new
-server. This step is a formal clean-up and not urgent.
 
-!!!!! It is possible to migrate devices to the EU hosted Mender without support assistance, 
-!!!!! however, this can be a high risk process and will be on your own responsability.
+1. Make a clone of the old server by contacting Northern.Tech
+2. Update the device with configuration for both servers
+3. Reject the device on the Old server
+4. Accept the device on the New server
+5. Update the with configuration for the New server only
 
-!!! Note that this method will not work on generic instances of the Mender server. It is only
-!!! possible with hosted Mender and EU hosted Mender because the databases are internally
-!!! synchronized for users performing the migration.
+The diagram below show describes the flow
 
-## Step 1: Deploy an update with the new Mender configuration
+![Migration flow](migration-flow.png)
 
-### Prepare the configuration file
 
-The new configuration file must include the [`Servers`
-field](../../03.Client-installation/07.Configuration-file/50.Configuration-options/docs.md#servers)
-with an array of `ServerURL` that the device will use. The first element in the array must be the
-old server (hosted Mender) and the second element must be the new server (EU hosted Mender).
+#### 1. Make a clone of the old server by contacting Northern.Tech
 
-The configuration file cannot include `ServerURL` field in the root.
+If you wish to migrate your account please contact us on [support@mender.io](mailto:contact@mender.io) with the title **Tenant migration**.
+In that request please share you "Organization name" as registered on Hosted Mender in "Organization and billing".
+We will get back to you once the tenant has been cloned an you can proceed to the next step.
 
-Depending on how the original Mender configuration file was generated, this can be achieved in
-different ways.
+
+#### 2. Update the device with configuration for both servers
+
+This will largely depend on the way you create build artifacts.
+Regardless of the approach the goal to update the device so it's config (`/etc/mender/mender.conf`) changes from:
+
+```
+{
+    "ServerURL": "https://hosted.mender.io",
+    "TenantToken": "abcdefghijklm1234567890",
+    ... <Other config parameters>
+}
+```
+
+to
+
+```
+{
+  "ServerURL": "",
+  "TenantToken": "abcdefghijklm1234567890",
+  "Servers": [
+    {
+      "ServerURL": "https://hosted.mender.io"
+    },
+    {
+      "ServerURL": "https://eu.hosted.mender.io"
+    }
+  ]
+  ... <Other config parameters>
+}
+```
+
+!The `ServerURL` field must be empty.
+
+Please check bellow for different approaches on how to achieve this:
+
+* [Yocto](#yocto)
+* [Debian](#Debian)
+* [Custom update module](#custom-update-module)
+
+
+#### 3. Reject the device on the Old server
+
+Once the deployment was successful and the device restarts, it will try communicating with the first server on the list.
+That is the Old server.
+
+As we want to cut communication with the Old server, reject the device.
+
+
+#### 4. Accept the device on the New server
+
+As the device can't connect to the primary server on the list it will try the alternative, which is in this case the Old server.
+
+#### 5. Update the with configuration for the New server only
+
+Once the device is correctly showing on the New server the last step is to deploy the configuration containing only the New server.
+
+```
+{
+    "ServerURL": "https://eu.hosted.mender.io",
+    "TenantToken": "abcdefghijklm1234567890",
+    ... <Other config parameters>
+}
+```
+
+## Methods for changing the configuration
+
+### Yocto
 
 For Yocto project integrations, if you are already passing your own configuration file to the build,
-as described in [Customize
-Mender](../../05.System-updates-Yocto-Project/05.Customize-Mender/docs.md#configuration-file),
-modify your `mender.conf` to include `Servers` array.
+as described in [Customize Mender](../../05.System-updates-Yocto-Project/05.Customize-Mender/docs.md#configuration-file), modify your `mender.conf` to include `Servers` array.
 
 If instead you are relying on `meta-mender` to autogenerate a configuration file based on variables
 you need to first capture the currently generated `mender.conf`, modify it, and use the [Customize
@@ -54,14 +116,16 @@ Mender](../../05.System-updates-Yocto-Project/05.Customize-Mender/docs.md#config
 to inject it back into the build. The file can be captured from a live device or from yocto
 `tmp/deploy/` directory (which will depend a bit on your setup).
 
-Similarly for Debian family integrations, if you are already passing your own configuration file
-with a [rootfs
-overlay](../../04.System-updates-Debian-family/03.Customize-Mender/docs.md#configuration-file),
-modify your `mender.conf` to include `Servers` array.
+At the end of the process you should have two mender artifacts:
+* one containing the config for both old and new server
+* one containing the config for the new server only
 
-If instead you rely on the autogenerated `mender.conf`, capture it, modify it, and set it up in a
-[rootfs
-overlay](../../04.System-updates-Debian-family/03.Customize-Mender/docs.md#configuration-file).
+
+### Debian
+
+Similarly for Debian family integrations, if you are already passing your own configuration file with a [rootfs overlay](../../04.System-updates-Debian-family/03.Customize-Mender/docs.md#configuration-file), modify your `mender.conf` to include `Servers` array.
+
+If instead you rely on the autogenerated `mender.conf`, capture it, modify it, and set it up in a [rootfs overlay](../../04.System-updates-Debian-family/03.Customize-Mender/docs.md#configuration-file).
 
 The fields that need modification are:
 * `ServerURL` shall be set to: `""` (empty string)
@@ -78,7 +142,20 @@ cat mender.conf | jq '
 ]' > mender.new.conf
 ```
 
-To perform the configuration update, another option can be a custom [Update Module](https://docs.mender.io/artifact-creation/create-a-custom-update-module). The following code is an example for this Update Module:
+At the end of the process you should have two mender artifacts:
+* one containing the config for both old and new server
+* one containing the config for the new server only
+
+
+### Custom update module
+
+It is also possible do the migration without having to do a full rootfs update.
+This can be done by deploying a custom update module just for this case.
+
+!! Please note that the update module is provided as an example only.
+!! It is not part of our internal testing pipelines.
+
+
 
 ``` bash
 #!/bin/sh
@@ -104,7 +181,7 @@ case "$STATE" in
         # Set the new configuration
         cp -f /etc/mender/mender.new.conf /etc/mender/mender.conf
         ;;
-    
+
     NeedsArtifactReboot)
         echo "Automatic"
         ;;
@@ -116,7 +193,7 @@ case "$STATE" in
     ArtifactRollback)
         cp -f /etc/mender/mender.old.conf /etc/mender/mender.conf
         ;;
-    
+
     Cleanup)
         # Delete used files
         rm /etc/mender/mender.old.conf /etc/mender/mender.new.conf
@@ -124,62 +201,21 @@ case "$STATE" in
 esac
 exit 0
 ```
-The example includes a way to rollback if the configuration ended up unable to connect to the server (ArtifactRollback). After the update is perform a reboot is requested (NeedsArtifactReboot) to ensure the Mender services restarts and load the new configuration.
 
-#### Manual device migration
-If you are migrating devices manually, the Update Module needs to be redefined. The `TenantToken` will also be modified in the `mender.conf` and the `ServerURL` will only be the desired instance, in this example the EU instance.
+The example includes a way to rollback if the configuration ended up unable to connect to the server (ArtifactRollback). 
+After the update is perform a reboot is requested (NeedsArtifactReboot) to ensure the Mender services restarts and load the new configuration.
 
-!!! Keep in mind this can be a **high risk** process, proceed with caution in case you are migrating devices in production.
 
-The next example contains the modified version of the UpdateModule for manual migration:
+In order to use the Update Module, it needs to be installed in the device filesystem. 
+To generate the artifact that installs the `migration-um-a` Update Module, the `single-artifact` Update Module can be used.
 
-```bash
-#!/bin/sh
+<!--AUTOVERSION: "github.com/mendersoftware/mender/blob/%/"/mender-->
+Using the script [single-file-artifact-gen](https://github.com/mendersoftware/mender/blob/master/support/modules-artifact-gen/single-file-artifact-gen) makes this process easier.
 
-set -e
-
-STATE="$1"
-FILES="$2"
-
-case "$STATE" in
-    ArtifactInstall)
-        # Backup of current conf file
-        cp /etc/mender/mender.conf /etc/mender/mender.old.conf
-
-        # Modify current conf file
-        cat /etc/mender/mender.conf | jq '
-.TenantToken = "NEW_TENANT_TOKEN" |
-.ServerURL = "" |   # Blank existing ServerURL
-.Servers = [        # Set Servers array of ServerURL(s)
-  {ServerURL: "https://eu.hosted.mender.io"}
-]' > /etc/mender/mender.new.conf
-
-        # Set the new configuration
-        cp -f /etc/mender/mender.new.conf /etc/mender/mender.conf
-        ;;
-    
-    NeedsArtifactReboot)
-        echo "Automatic"
-        ;;
-
-    SupportsRollback)
-        echo "No"
-        ;;
-esac
-exit 0
-```
-Please notice, this version **will not rollback** to the previous `mender.conf` file in case the device ended up unable to connect to the server. This means the device will be unreachable and will stay in an unknown state. We advice to test with with local devices to validate the UpdateModule.
-
-Keep in mind the Update Module file needs to be executable. For this example, the file will be named `migration-um-a`:
-
-``` bash
-chmod +x migration-um-a
-```
 
 ### Create the Mender Artifact
 
 Now create an Artifact with the updated `mender.conf` using the your current workflow to create
-Artifacts. It is recommended to use a full system update artifact to update the configuration. However, you can also use the custom Update Module.
 
 For this example, the following command will generate the artifact: 
 
@@ -192,7 +228,7 @@ FILE="migration-um-a"
 single-file-artifact-gen -n ${ARTIFACT_NAME} -t ${DEVICE_TYPE} -d ${DEST_DIR} -o ${OUTPUT_PATH} ${FILE}
 ```
 
-Aditionally, to trigger the `migration-um-a` Update Module, an additional artifact needs to be created. For this new artifact, the [mender-artifact](https://docs.mender.io/downloads#mender-artifact) cli tool will be used:
+Additionally, to trigger the `migration-um-a` Update Module, an additional artifact needs to be created. For this new artifact, the [mender-artifact](https://docs.mender.io/downloads#mender-artifact) cli tool will be used:
 
 ```bash
 ARTIFACT_NAME="trigger-eu-mig-a"
@@ -201,51 +237,3 @@ UPDATE_MODULE="migration-um-a"
 FILE="migration-a.mender"
 mender-artifact write module-image -t $DEVICE_TYPE -o $FILE -T $UPDATE_MODULE -n $ARTIFACT_NAME
 ````
-
-In order to use the Update Module, it needs to be installed in the device filesystem. To generate the artifact that installs the `migration-um-a` Update Module, the `single-artifact` Update Module can be used.
-
-<!--AUTOVERSION: "github.com/mendersoftware/mender/blob/%/"/mender-->
-Using the script [single-file-artifact-gen](https://github.com/mendersoftware/mender/blob/master/support/modules-artifact-gen/single-file-artifact-gen) makes this process easier.
-
-### Deploy the update
-
-Once the Artifact with the new `mender.conf` is uploaded to hosted Mender, create a deployment for
-your fleet with it.
-
-For the `migration-um-a` Update Module, the artifact that installs it must be deployed first, then the artifact that triggers it can be deployed.
-
-The devices will now be updating their configuration but still using the old hosted Mender (USA) to
-commit the update and poll for further updates, because they orderly follow the server URLs found in
-the `Servers` field of the configuration file. This information not applies to the manual migration of devices, as the `TenantToken`will be different from the original one and the EU server will the only `ServerURL` available.
-
-## Step 2: Reject devices from the old server
-
-Once the deployment has successfully finished, the next step is to reject the devices from the old
-server. As the backend databases have been syncronized, once the devices get an Unauthorized
-response from the old server they will try with the new server (the next in the `Servers` array).
-
-To reject devices either use the GUI
-
-![reject device](reject-device.png)
-
-or the API. See [API
-documentation](../../200.Server-side-API/?target=_blank#management-api-device-authentication-reject-authentication).
-
-For the manual migration, you can pre-authorize the device in the EU instance or manually accept each migrated device.
-
-## Step 3: Update again the Mender configuration
-
-Now it is time to clean-up the configuration file.
-
-The new `mender.conf` file should contain only the new server in the `Servers` array:
-
-```
-.Servers = [
-  {ServerURL: "https://eu.hosted.mender.io"}
-]
-```
-
-Following similar steps that in Step 1 above, create an Artifact with the updated configuration
-file, upload it to EU hosted Mender, and and deploy it to your devices.
-
-This step it is not necessary for the manual migration as the `mender.conf` file only contains the new server.
